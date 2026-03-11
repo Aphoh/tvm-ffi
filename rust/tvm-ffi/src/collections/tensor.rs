@@ -297,6 +297,64 @@ impl Tensor {
             }
         }
     }
+
+    /// Create a Tensor from a NDAllocator with explicit strides.
+    ///
+    /// # Arguments
+    /// * `alloc` - The NDAllocator
+    /// * `shape` - The shape of the Tensor
+    /// * `strides` - The strides of the Tensor in elements
+    /// * `dtype` - The data type of the Tensor
+    /// * `device` - The device of the Tensor
+    ///
+    /// # Returns
+    /// * `Tensor` - The created Tensor
+    pub fn from_nd_alloc_strided<TNDAlloc>(
+        alloc: TNDAlloc,
+        shape: &[i64],
+        strides: &[i64],
+        dtype: DLDataType,
+        device: DLDevice,
+    ) -> Self
+    where
+        TNDAlloc: NDAllocator,
+    {
+        assert_eq!(
+            shape.len(),
+            strides.len(),
+            "shape/strides length mismatch"
+        );
+        let tensor_obj = TensorObjFromNDAlloc {
+            base: TensorObj {
+                object: Object::new(),
+                dltensor: DLTensor {
+                    data: std::ptr::null_mut(),
+                    device,
+                    ndim: shape.len() as i32,
+                    dtype,
+                    shape: std::ptr::null_mut(),
+                    strides: std::ptr::null_mut(),
+                    byte_offset: 0,
+                },
+            },
+            alloc,
+        };
+        unsafe {
+            let mut obj_arc = ObjectArc::new_with_extra_items(tensor_obj);
+            obj_arc.base.dltensor.shape =
+                TensorObjFromNDAlloc::extra_items(&obj_arc).as_ptr() as *mut i64;
+            obj_arc.base.dltensor.strides = obj_arc.base.dltensor.shape.add(shape.len());
+            let extra_items = TensorObjFromNDAlloc::extra_items_mut(&mut obj_arc);
+            extra_items[..shape.len()].copy_from_slice(shape);
+            extra_items[shape.len()..shape.len() * 2].copy_from_slice(strides);
+            let dltensor_ptr = &obj_arc.base.dltensor as *const DLTensor;
+            obj_arc.base.dltensor.data = obj_arc.alloc.alloc_data(&*dltensor_ptr);
+            Self {
+                data: ObjectArc::from_raw(ObjectArc::into_raw(obj_arc) as *mut TensorObj),
+            }
+        }
+    }
+
     /// Create a Tensor from a slice
     ///
     /// # Arguments
